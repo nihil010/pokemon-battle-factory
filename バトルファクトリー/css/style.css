@@ -13,7 +13,12 @@ body, html {
     display: flex;
     justify-content: center;
     align-items: center;
+    
+    /* スマホ操作の安定化のために以下2行を追加 */
+    touch-action: manipulation;
+    overscroll-behavior: none; 
 }
+
 
 /* --- ゲームコンテナ（強制的に横長のPCサイズに固定） --- */
 #game-container {
