@@ -1,0 +1,373 @@
+/* css/style.css (完全版) */
+
+* {
+    box-sizing: border-box;
+    font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif;
+}
+
+body, html {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background-color: #2c3e50;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+/* --- ゲームコンテナ（強制的に横長のPCサイズに固定） --- */
+#game-container {
+    width: 800px;
+    height: 600px;
+    background-color: #f0f0f0;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 0 20px rgba(0,0,0,0.5);
+}
+
+.screen {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* --- パネルヘッダー --- */
+.panel-header {
+    background: #333;
+    color: #fff;
+    padding: 10px 20px;
+    font-size: 1.1em;
+    font-weight: bold;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* --- 選出画面のグリッド（スクロール無効化・1画面に収める） --- */
+.grid-container {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(2, 1fr); /* 強制的に2行にして高さを揃える */
+    gap: 8px;
+    padding: 10px;
+    flex: 1;
+    overflow: hidden; /* スクロールバーを完全に消去 */
+    background-color: #ecf0f1;
+}
+
+.pokemon-card {
+    background: #fff;
+    border: 2px solid #bdc3c7;
+    border-radius: 8px;
+    padding: 5px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+    line-height: 1.2;
+}
+
+/* 枠内に収まるように画像サイズを少し縮小 */
+.pokemon-card img {
+    width: 65px;
+    height: 65px;
+    object-fit: contain;
+}
+
+.pokemon-card.selected {
+    border-color: #e74c3c;
+    background: #fadbd8;
+    transform: scale(1.02);
+}
+
+/* --- バトルフィールド --- */
+.battle-field {
+    flex: 1;
+    background: linear-gradient(to bottom, #87CEEB, #E0F6FF);
+    position: relative;
+    overflow: hidden;
+}
+
+/* 台座（サイズと配置を調整して距離をとる） */
+.enemy-side::after, .player-side::after {
+    content: '';
+    position: absolute;
+    width: 280px;
+    height: 75px;
+    background: #78C850;
+    border-radius: 50%;
+    border: 4px solid #5A9C32;
+    z-index: 0;
+    transform: perspective(200px) rotateX(60deg);
+}
+
+.enemy-side::after {
+    right: 40px;
+    top: 130px;
+}
+
+.player-side::after {
+    left: 40px;
+    bottom: 30px;
+}
+
+/* ポケモン画像（被らないようサイズを整え、台座に乗せる） */
+.pokemon-sprite {
+    width: 170px;
+    height: 170px;
+    object-fit: contain;
+    position: absolute;
+    image-rendering: pixelated;
+    z-index: 1;
+}
+
+#enemy-sprite {
+    right: 95px;
+    top: 15px;
+}
+
+#player-sprite {
+    left: 95px;
+    bottom: 40px;
+}
+
+/* --- ステータスボックス（四隅にピタッと寄せる） --- */
+.status-box {
+    background: #fff;
+    border: 3px solid #555;
+    border-radius: 8px;
+    padding: 8px;
+    box-shadow: 3px 3px 0 rgba(0,0,0,0.2);
+    z-index: 2;
+    width: 260px;
+}
+
+.enemy-status {
+    position: absolute;
+    left: 20px;
+    top: 20px;
+}
+
+.player-status {
+    position: absolute;
+    right: 20px;
+    bottom: 20px;
+}
+
+.name-bar {
+    display: flex;
+    justify-content: space-between;
+    font-weight: bold;
+    margin-bottom: 4px;
+    font-size: 1.1em;
+}
+
+.hp-bar-container {
+    width: 100%;
+    height: 10px;
+    background-color: #555;
+    border-radius: 5px;
+    border: 2px solid #333;
+}
+
+.hp-bar-fill {
+    height: 100%;
+    background-color: #4cd964;
+    width: 100%;
+    transition: all 0.4s;
+}
+
+.hp-text {
+    text-align: right;
+    font-size: 0.9em;
+    margin-top: 4px;
+    font-weight: bold;
+}
+
+.status-badge {
+    margin-left: 8px;
+    font-size: 0.8em;
+    padding: 2px 4px;
+    border-radius: 4px;
+    color: white;
+}
+
+/* --- 下部コマンドエリア --- */
+.bottom-panel {
+    height: 220px;
+    background-color: #444;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+}
+
+.message-box {
+    flex: 1;
+    background: #fff;
+    border: 6px double #777;
+    border-radius: 8px;
+    padding: 15px;
+    font-size: 1.2em;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+}
+
+.command-box {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.move-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 10px;
+    flex: 1;
+}
+
+/* --- ボタンデザイン --- */
+.move-btn {
+    background: linear-gradient(to bottom, #ffffff, #e6f2ff);
+    border: 2px solid #5fa8d3;
+    border-radius: 6px;
+    font-size: 1.1em;
+    font-weight: bold;
+    color: #2c3e50;
+    cursor: pointer;
+    box-shadow: 0 4px 0 #3b7ea1;
+}
+
+.move-btn:active {
+    transform: translateY(4px);
+    box-shadow: none;
+}
+
+.move-btn:disabled {
+    background: #e0e0e0;
+    border-color: #a0a0a0;
+    color: #888;
+    box-shadow: 0 4px 0 #999;
+    cursor: not-allowed;
+}
+
+.ds-button {
+    background: linear-gradient(to bottom, #ffffff, #f0f0f0);
+    border: 2px solid #888;
+    border-radius: 6px;
+    font-size: 1em;
+    font-weight: bold;
+    padding: 10px;
+    cursor: pointer;
+    box-shadow: 0 4px 0 #666;
+    text-align: center;
+}
+
+.ds-button:active {
+    transform: translateY(4px);
+    box-shadow: none;
+}
+
+.ds-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+/* --- 交代・交換リスト --- */
+.party-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.trade-item {
+    background: #fff;
+    border: 2px solid #999;
+    padding: 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: bold;
+}
+
+.trade-item.selected {
+    background: #cce5ff;
+    border-color: #0066cc;
+}
+
+/* --- 追加: ステータス詳細の表示 --- */
+.info-bar {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 4px;
+}
+
+.type-display {
+    font-size: 0.8em;
+    font-weight: bold;
+    color: #666;
+    margin-bottom: 4px;
+}
+
+.item-display {
+    font-size: 0.8em;
+    font-weight: bold;
+    color: #d35400;
+}
+
+/* --- 追加: 技ボタン内の表示 --- */
+.move-btn {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+.move-name {
+    font-size: 1.1em;
+    font-weight: bold;
+}
+
+.move-details {
+    font-size: 0.7em;
+    margin-top: 4px;
+    color: #444;
+}
+
+/* --- 技タイプごとの色分けバッジ --- */
+.type-badge {
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: #fff;
+    font-weight: bold;
+    text-shadow: 1px 1px 0px rgba(0,0,0,0.3);
+}
+
+.type-ノーマル { background-color: #A8A878; }
+.type-ほのお { background-color: #F08030; }
+.type-みず { background-color: #6890F0; }
+.type-でんき { background-color: #F8D030; color: #333; text-shadow: none; }
+.type-くさ { background-color: #78C850; }
+.type-こおり { background-color: #98D8D8; color: #333; text-shadow: none; }
+.type-かくとう { background-color: #C03028; }
+.type-どく { background-color: #A040A0; }
+.type-じめん { background-color: #E0C068; color: #333; text-shadow: none; }
+.type-ひこう { background-color: #A890F0; }
+.type-エスパー { background-color: #F85888; }
+.type-むし { background-color: #A8B820; }
+.type-いわ { background-color: #B8A038; }
+.type-ゴースト { background-color: #705898; }
+.type-ドラゴン { background-color: #7038F8; }
+.type-あく { background-color: #705848; }
+.type-はがね { background-color: #B8B8D0; color: #333; text-shadow: none; }
+.type-フェアリー { background-color: #EE99AC; color: #333; text-shadow: none; }

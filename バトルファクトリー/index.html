@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>バトルファクトリー Simulator</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="game-container">
+        
+<!-- 画面1: 選出＆ロード画面 の直下を書き換える -->
+<section id="screen-selection" class="screen active">
+    <div class="panel-header">
+        レンタルポケモンを 3びき えらんでください
+	<span id="win-streak-display" style="font-weight: bold; color: #ff3b30;">0連勝中</span>
+    </div>
+            
+            <!-- セーブコード関連 -->
+            <div style="padding: 10px; background: #ddd; text-align: center; border-bottom: 2px solid #ccc;">
+                <input type="text" id="save-code-input" placeholder="セーブコードを入力して続きから" style="width: 70%; padding: 5px; border-radius: 4px; border: 1px solid #999;">
+                <button id="btn-load" class="ds-button" style="padding: 5px 10px;">ロード</button>
+                <div id="save-code-display" style="font-size: 0.8em; margin-top: 5px; color: #d35400; font-weight: bold;"></div>
+            </div>
+
+            <div id="draft-pool" class="grid-container" style="overflow-y: auto;">
+                <!-- JSで6匹の選択肢を生成 -->
+            </div>
+            <button id="btn-start-battle" class="ds-button" disabled>バトルスタート</button>
+        </section>
+
+<!-- 画面2: バトル画面 -->
+        <section id="screen-battle" class="screen hidden">
+            <div class="battle-field">
+                <!-- 相手側 -->
+                <div class="enemy-side">
+                    <div class="status-box enemy-status">
+                        <div class="name-bar">
+                            <span id="enemy-name">---</span>
+                            <span class="level">Lv50</span>
+                        </div>
+                        <!-- ★敵のタイプ表示用 -->
+                        <div id="enemy-types" class="type-display"></div>
+                        <div class="hp-bar-container"><div id="enemy-hp-bar" class="hp-bar-fill"></div></div>
+                    </div>
+                    <img id="enemy-sprite" class="pokemon-sprite" src="" alt="enemy">
+                </div>
+                <!-- 味方側 -->
+                <div class="player-side">
+                    <img id="player-sprite" class="pokemon-sprite" src="" alt="player">
+                    <div class="status-box player-status">
+                        <div class="name-bar">
+                            <span id="player-name">---</span>
+                            <span class="level">Lv50</span>
+                        </div>
+                        <!-- ★味方のタイプと持ち物表示用 -->
+                        <div class="info-bar">
+                            <span id="player-types" class="type-display"></span>
+                            <span id="player-item" class="item-display"></span>
+                        </div>
+                        <div class="hp-bar-container"><div id="player-hp-bar" class="hp-bar-fill"></div></div>
+                        <div id="player-hp-text" class="hp-text">--- / ---</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- メッセージ＆コマンドエリア -->
+            <div class="bottom-panel">
+                <div id="message-box" class="message-box">バトル開始！</div>
+                <div id="command-box" class="command-box hidden">
+                    <div class="move-grid">
+                        <!-- ★技ボタンの中に名前と詳細の2行を入れる -->
+                        <button class="move-btn" id="move-0">
+                            <div class="move-name" id="move-name-0">---</div>
+                            <div class="move-details" id="move-details-0"></div>
+                        </button>
+                        <button class="move-btn" id="move-1">
+                            <div class="move-name" id="move-name-1">---</div>
+                            <div class="move-details" id="move-details-1"></div>
+                        </button>
+                        <button class="move-btn" id="move-2">
+                            <div class="move-name" id="move-name-2">---</div>
+                            <div class="move-details" id="move-details-2"></div>
+                        </button>
+                        <button class="move-btn" id="move-3">
+                            <div class="move-name" id="move-name-3">---</div>
+                            <div class="move-details" id="move-details-3"></div>
+                        </button>
+                    </div>
+                    <button id="btn-switch-pokemon" class="ds-button" style="width: 100%; margin-top: 10px; padding: 8px;">ポケモンを いれかえる</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- 画面3: 交代画面 (バトル中の入れ替え用) -->
+        <section id="screen-switch" class="screen hidden">
+            <div class="panel-header">どの ポケモンを だしますか？</div>
+            <div id="party-list" class="party-list" style="flex: 1; padding: 10px; overflow-y: auto;">
+                <!-- JSで手持ちポケモンを生成 -->
+            </div>
+            <button id="btn-cancel-switch" class="ds-button">もどる</button>
+        </section>
+
+        <!-- 画面4: 交換画面 (バトル勝利後) -->
+        <section id="screen-trade" class="screen hidden">
+            <div class="panel-header">ポケモンを こうかん しますか？</div>
+            <div class="trade-area" style="flex: 1; display: flex; flex-direction: column; padding: 10px;">
+                <div style="font-weight: bold; margin-bottom: 5px;">【じぶんの ポケモン】</div>
+                <div class="party-list" id="player-party-trade" style="margin-bottom: 15px;"></div>
+                <div style="font-weight: bold; margin-bottom: 5px;">【あいての ポケモン】</div>
+                <div class="party-list" id="enemy-party-trade"></div>
+            </div>
+            <button id="btn-skip-trade" class="ds-button">こうかんしない</button>
+        </section>
+
+    </div>
+    
+    <!-- 1. データを先に読み込む (.js化したマスターデータ群) -->
+    <script src="data/pokemon_data.js"></script>
+    <script src="data/moves.js"></script>
+    <script src="data/type_chart.js"></script>
+    <script src="data/factory_sets.js"></script>
+
+    <!-- 2. システム処理を読み込む -->
+    <script src="js/pokemon.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/battle.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
