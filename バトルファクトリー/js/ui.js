@@ -174,26 +174,63 @@ class UIManager {
     buildTradeScreen(playerParty, enemyParty, onTradeCallback) {
         const pContainer = document.getElementById('player-party-trade');
         const eContainer = document.getElementById('enemy-party-trade');
+        const originalBtn = document.getElementById('btn-skip-trade');
         
         if (!pContainer || !eContainer) return;
 
         pContainer.innerHTML = '';
         eContainer.innerHTML = '';
 
+        // ボタンを動的に生成するためのグループ枠を作成
+        let btnGroup = document.getElementById('trade-btn-group');
+        if (!btnGroup) {
+            btnGroup = document.createElement('div');
+            btnGroup.id = 'trade-btn-group';
+            btnGroup.style.display = 'flex';
+            btnGroup.style.flexDirection = 'column';
+            btnGroup.style.gap = '10px';
+            btnGroup.style.marginTop = '15px';
+            originalBtn.parentNode.insertBefore(btnGroup, originalBtn);
+            originalBtn.style.display = 'none'; // 古いボタンは隠す
+        }
+
         let selectedPlayerIdx = null;
         let selectedEnemyIdx = null;
 
         const checkReady = () => {
-            const skipBtn = document.getElementById('btn-skip-trade');
+            btnGroup.innerHTML = ''; // ボタンを一旦リセット
+
             if (selectedPlayerIdx !== null && selectedEnemyIdx !== null) {
-                skipBtn.textContent = 'このポケモンを こうかんする！';
-                skipBtn.onclick = () => onTradeCallback(selectedPlayerIdx, selectedEnemyIdx);
+                // 両方選択されている場合の3つのボタン
+                const btnPokemon = document.createElement('button');
+                btnPokemon.className = 'ds-button';
+                btnPokemon.textContent = 'ポケモンを こうかんする';
+                btnPokemon.onclick = () => onTradeCallback('pokemon', selectedPlayerIdx, selectedEnemyIdx);
+                
+                const btnItem = document.createElement('button');
+                btnItem.className = 'ds-button';
+                btnItem.textContent = 'もちものだけ こうかんする';
+                btnItem.onclick = () => onTradeCallback('item', selectedPlayerIdx, selectedEnemyIdx);
+
+                const btnSkip = document.createElement('button');
+                btnSkip.className = 'ds-button';
+                btnSkip.textContent = 'やっぱり こうかんしない';
+                btnSkip.onclick = () => onTradeCallback('skip', null, null);
+                
+                btnGroup.appendChild(btnPokemon);
+                btnGroup.appendChild(btnItem);
+                btnGroup.appendChild(btnSkip);
             } else {
-                skipBtn.textContent = 'こうかんしない';
-                skipBtn.onclick = () => onTradeCallback(null, null); 
+                // 未選択時はスキップボタンのみ
+                const btnSkip = document.createElement('button');
+                btnSkip.className = 'ds-button';
+                btnSkip.textContent = 'こうかんしない';
+                btnSkip.onclick = () => onTradeCallback('skip', null, null);
+                btnGroup.appendChild(btnSkip);
             }
         };
 
+        // 味方の描画
         playerParty.forEach((poke, idx) => {
             const el = document.createElement('div');
             el.className = 'trade-item';
@@ -212,6 +249,7 @@ class UIManager {
             pContainer.appendChild(el);
         });
 
+        // 相手の描画
         enemyParty.forEach((poke, idx) => {
             const el = document.createElement('div');
             el.className = 'trade-item';
