@@ -357,19 +357,39 @@ class GameController {
 
     showTradeScreen() {
         this.ui.switchScreen('screen-trade');
-        this.ui.buildTradeScreen(this.playerParty, this.enemyParty, (playerIdx, enemyIdx) => {
-            if (playerIdx !== null && enemyIdx !== null) {
+        this.ui.buildTradeScreen(this.playerParty, this.enemyParty, (tradeType, playerIdx, enemyIdx) => {
+            
+            if (tradeType === 'pokemon') {
+                // ポケモンごとの交換
                 const temp = this.playerParty[playerIdx];
                 this.playerParty[playerIdx] = this.enemyParty[enemyIdx];
                 this.enemyParty[enemyIdx] = temp;
                 this.ui.showMessage('ポケモンを こうかんした！', 1000).then(() => {
                     this.prepareNextBattle();
                 });
+                
+            } else if (tradeType === 'item') {
+                // もちものだけ交換
+                const tempItem = this.playerParty[playerIdx].item;
+                this.playerParty[playerIdx].item = this.enemyParty[enemyIdx].item;
+                this.enemyParty[enemyIdx].item = tempItem;
+                
+                // セーブデータ用のもちもの情報も更新する
+                const tempOrigItem = this.playerParty[playerIdx]._originalSetInfo.item;
+                this.playerParty[playerIdx]._originalSetInfo.item = this.enemyParty[enemyIdx]._originalSetInfo.item;
+                this.enemyParty[enemyIdx]._originalSetInfo.item = tempOrigItem;
+
+                this.ui.showMessage('もちものを こうかんした！', 1000).then(() => {
+                    this.prepareNextBattle();
+                });
+                
             } else {
+                // こうかんしない（スキップ）
                 this.prepareNextBattle();
             }
         });
     }
+
 
     prepareNextBattle() {
         const enemyPool = this.getRandomSets(3);
