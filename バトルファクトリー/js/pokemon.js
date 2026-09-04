@@ -6,11 +6,13 @@ class Pokemon {
         this.name = baseData.name;
         this.types = baseData.types;
         
-        // ★修正: ポケモンのIDから直接、3Dアニメーション(Showdownモデル)のURLを生成する
-        this.frontSpriteUrl = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/showdown/${this.id}.gif`;
-        this.backSpriteUrl = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/showdown/back/${this.id}.gif`;
-        
-        // ★追加: もしアニメーションが存在しなかった場合（画像エラー時）の予備として静止画を保持
+        const getAnimUrl = (url) => {
+            if (!url) return url;
+            return url.replace('/pokemon/', '/pokemon/other/showdown/').replace('.png', '.gif');
+        };
+
+        this.frontSpriteUrl = getAnimUrl(baseData.sprite_url) || baseData.sprite_url;
+        this.backSpriteUrl = getAnimUrl(baseData.sprite_back_url || baseData.sprite_url) || baseData.sprite_url;
         this.fallbackFrontUrl = baseData.sprite_url;
         this.fallbackBackUrl = baseData.sprite_back_url || baseData.sprite_url;
 
@@ -41,14 +43,11 @@ class Pokemon {
 
         this.currentHp = this.maxHp;
         this.status = 'none';
-        this.isFlinching = false;
-        this.isProtected = false; 
         
-        this.statRanks = {
-            attack: 0, defense: 0, sp_attack: 0, sp_defense: 0, speed: 0, accuracy: 0, evasion: 0
-        };
-
         this._originalSetInfo = setInfo;
+        
+        // 初回の戦闘用ステータス初期化
+        this.resetBattleState();
     }
 
     calculateHp(base, iv, ev) {
@@ -87,11 +86,40 @@ class Pokemon {
         return 1.0;
     }
 
+    // 交代時・復活時などの戦闘用フラグリセット
+    resetBattleState() {
+        this.isFlinching = false;
+        this.isProtected = false; 
+        this.hasSubstitute = false;
+        this.substituteHp = 0;
+        this.tauntTurns = 0;
+        this.statRanks = { attack: 0, defense: 0, sp_attack: 0, sp_defense: 0, speed: 0, accuracy: 0, evasion: 0 };
+        
+        // 猛毒の経過ターン
+        this.badPoisonTurn = 0;
+        
+        // 場に出た最初のターン判定（ねこだまし等に必要）
+        this.isFirstTurn = true;
+        
+        // 交代で解除される特殊状態
+        this.volatiles = {
+            leechSeed: false,
+            confusionTurns: 0,
+            encoreTurns: 0,
+            encoredMove: null
+        };
+    }
+
+    // バトル完全終了時の全回復リセット
     reset() {
         this.currentHp = this.maxHp;
         this.status = 'none';
-        this.isFlinching = false;
-        this.isProtected = false; 
-        this.statRanks = { attack: 0, defense: 0, sp_attack: 0, sp_defense: 0, speed: 0, accuracy: 0, evasion: 0 };
+        
+        // はたきおとされたアイテム等の復元
+        if (this._originalSetInfo.item !== this.item) {
+            this.item = this._originalSetInfo.item;
+        }
+
+        this.resetBattleState();
     }
 }
