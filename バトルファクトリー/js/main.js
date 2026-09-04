@@ -13,6 +13,7 @@ class GameController {
         
         this.winCount = 0;
         this.turnCommand = null;
+        this.pendingSwitch = null; // とんぼがえり等の交代待ちフラグ
     }
 
     init() {
@@ -45,7 +46,6 @@ class GameController {
 
     startDraftPhase() {
         this.ui.switchScreen('screen-selection');
-        
         const poolSets = this.getRandomSets(6);
         const poolPokemons = poolSets.map(set => this.createPokemonInstance(set));
         
@@ -103,20 +103,20 @@ class GameController {
         this.ui.showCommands(this.getActivePlayer().moves);
     }
 
-    showSwitchScreen(isFainted) {
+    showSwitchScreen(isFainted, isForcedMove = false) {
         this.ui.switchScreen('screen-switch');
         const container = document.getElementById('party-list');
         container.innerHTML = '';
         
         const cancelBtn = document.getElementById('btn-cancel-switch');
-        cancelBtn.style.display = isFainted ? 'none' : 'block';
+        cancelBtn.style.display = (isFainted || isForcedMove) ? 'none' : 'block';
 
         this.playerParty.forEach((poke, idx) => {
             const el = document.createElement('div');
             el.className = 'trade-item';
             el.innerHTML = `
                 <div style="display: flex; align-items: center;">
-                    <img src="${poke.frontSpriteUrl}" style="width: 50px; height: 50px; margin-right: 10px;">
+                    <img src="${poke.frontSpriteUrl}" onerror="this.onerror=null; this.src='${poke.fallbackFrontUrl}'" style="width: 50px; height: 50px; margin-right: 10px;">
                     <div>${poke.name} (HP: ${Math.max(0, Math.floor(poke.currentHp))}/${poke.maxHp}) @${poke.item || 'なし'}</div>
                 </div>
             `;
@@ -128,8 +128,12 @@ class GameController {
             } else {
                 el.onclick = () => {
                     this.ui.switchScreen('screen-battle');
-                    if (isFainted) {
-                        this.executeSwitch(idx, true);
+                    if (isFainted || isForcedMove) {
+                        this.executeSwitch(idx, isFainted);
+                        if (isForcedMove && !isFainted) {
+                            // とんぼがえり等の処理後、ターンの残りを再開するかコマンドへ
+                            this.promptCommand();
+                        }
                     } else {
                         this.turnCommand = { type: 'switch', switchIndex: idx };
                         this.executeTurn();
@@ -142,8 +146,7 @@ class GameController {
 
     async executeSwitch(newIdx, isFainted = false) {
         this.activePlayerIdx = newIdx;
-        this.getActivePlayer().statRanks = { attack: 0, defense: 0, sp_attack: 0, sp_defense: 0, speed: 0, accuracy: 0, evasion: 0 };
-        this.getActivePlayer().isProtected = false; // 交代時にまもる解除
+        this.getActivePlayer().resetBattleState(); // 戦闘用フラグをリセット
         this.updateFieldUI();
         await this.ui.showMessage(`ゆけっ！ ${this.getActivePlayer().name}！`, 1000);
         
@@ -157,12 +160,13 @@ class GameController {
         const player = this.getActivePlayer();
         const enemy = this.getActiveEnemy();
 
-        // ターン開始時に前ターンの「まもる」を解除
         player.isProtected = false;
         enemy.isProtected = false;
+        this.pendingSwitch = null;
 
         let enemyAction = { type: 'move', move: enemy.moves[Math.floor(Math.random() * enemy.moves.length)] };
         let playerAction = this.turnCommand;
+        
         if (playerAction.type === 'move') {
             playerAction.move = player.moves[playerAction.moveIndex];
         }
@@ -172,13 +176,8 @@ class GameController {
             await this.executeSwitch(playerAction.switchIndex);
             
             await this.processAction(this.getActiveEnemy(), this.getActivePlayer(), enemyAction.move, 'enemy', 'player', playerAction, true);
-            
-            if (this.getActiveEnemy().currentHp <= 0) await this.handleFaint('enemy');
-            if (this.getActivePlayer().currentHp <= 0) await this.handleFaint('player');
         } else {
             const speedCompare = this.battle.compareSpeed(player, enemy);
-            
-            // まもるの優先度(+4)を強制的に適用
             const pMovePrio = playerAction.move.name === 'まもる' ? 4 : (playerAction.move.priority || 0);
             const eMovePrio = enemyAction.move.name === 'まもる' ? 4 : (enemyAction.move.priority || 0);
             
@@ -191,36 +190,70 @@ class GameController {
             const second = isPlayerFirst ? { poke: enemy, move: enemyAction.move, side: 'enemy', action: enemyAction } : { poke: player, move: playerAction.move, side: 'player', action: playerAction };
 
             await this.processAction(first.poke, second.poke, first.move, first.side, second.side, second.action, false);
+            await this.handleFaintAndSwitch(first.side, second.side);
             
-            if (first.poke.currentHp <= 0 || second.poke.currentHp <= 0) {
-                if (first.poke.currentHp <= 0) await this.handleFaint(first.side);
-                if (second.poke.currentHp <= 0) await this.handleFaint(second.side);
-                return;
-            }
-
-            await this.processAction(second.poke, first.poke, second.move, second.side, first.side, first.action, true);
-            
-            if (first.poke.currentHp <= 0 || second.poke.currentHp <= 0) {
-                if (second.poke.currentHp <= 0) await this.handleFaint(second.side);
-                if (first.poke.currentHp <= 0) await this.handleFaint(first.side);
-                return;
+            if (first.poke.currentHp > 0 && second.poke.currentHp > 0 && !this.pendingSwitch) {
+                await this.processAction(second.poke, first.poke, second.move, second.side, first.side, first.action, true);
+                await this.handleFaintAndSwitch(first.side, second.side);
             }
         }
 
-        if(this.getActivePlayer().currentHp > 0 && this.getActiveEnemy().currentHp > 0){
+        if (this.getActivePlayer().currentHp > 0 && this.getActiveEnemy().currentHp > 0 && !this.pendingSwitch) {
             await this.processEndOfTurn();
-            
-            if (this.getActivePlayer().currentHp <= 0) await this.handleFaint('player');
-            else if (this.getActiveEnemy().currentHp <= 0) await this.handleFaint('enemy');
-            else this.promptCommand();
+            await this.handleFaintAndSwitch('player', 'enemy');
+        }
+        
+        // ターンの最後に「場に出た最初のターン」判定を解除
+        this.getActivePlayer().isFirstTurn = false;
+        this.getActiveEnemy().isFirstTurn = false;
+
+        if (this.getActivePlayer().currentHp > 0 && this.getActiveEnemy().currentHp > 0 && !this.pendingSwitch) {
+            this.promptCommand();
+        }
+    }
+
+    async handleFaintAndSwitch(side1, side2) {
+        if (this.getActivePlayer().currentHp <= 0) await this.handleFaint('player');
+        if (this.getActiveEnemy().currentHp <= 0) await this.handleFaint('enemy');
+        
+        // とんぼがえり等による強制交代
+        if (this.pendingSwitch === 'player' && this.getActivePlayer().currentHp > 0) {
+            const hasAlive = this.playerParty.some(p => p.currentHp > 0 && p !== this.getActivePlayer());
+            if (hasAlive) this.showSwitchScreen(false, true);
+            this.pendingSwitch = null;
+        } else if (this.pendingSwitch === 'enemy' && this.getActiveEnemy().currentHp > 0) {
+            const aliveIdxs = this.enemyParty.map((p, i) => p.currentHp > 0 && p !== this.getActiveEnemy() ? i : -1).filter(i => i !== -1);
+            if (aliveIdxs.length > 0) {
+                await this.ui.showMessage(`${this.getActiveEnemy().name} は 手持ちに 戻った！`, 1000);
+                this.activeEnemyIdx = aliveIdxs[Math.floor(Math.random() * aliveIdxs.length)];
+                this.getActiveEnemy().resetBattleState();
+                this.updateFieldUI();
+                await this.ui.showMessage(`あいては ${this.getActiveEnemy().name} を くりだした！`, 1500);
+            }
+            this.pendingSwitch = null;
         }
     }
 
     async processAction(attacker, defender, move, atkSide, defSide, defenderAction, isDefenderMoved) {
-        // ★追加: 「まもる」発動処理
         if (move.name === 'まもる') {
             attacker.isProtected = true;
             await this.ui.showMessage(`${attacker.name} は 守りの 体勢に入った！`, 1500);
+            return;
+        }
+
+        if (move.name === 'みがわり') {
+            if (attacker.hasSubstitute) {
+                await this.ui.showMessage(`${attacker.name} は すでに 身代わりを 出している！`, 1500);
+            } else if (attacker.currentHp <= Math.floor(attacker.maxHp / 4)) {
+                await this.ui.showMessage(`体力が 足りない！`, 1500);
+            } else {
+                const cost = Math.floor(attacker.maxHp / 4);
+                attacker.currentHp -= cost;
+                attacker.hasSubstitute = true;
+                attacker.substituteHp = cost;
+                this.ui.updateHpBar(atkSide, attacker);
+                await this.ui.showMessage(`${attacker.name} は 身代わりを 出した！`, 1500);
+            }
             return;
         }
 
@@ -233,15 +266,29 @@ class GameController {
             }
         }
 
-        const moveCheck = this.battle.checkCanMove(attacker);
+        const moveCheck = this.battle.checkCanMove(attacker, move);
+        if (moveCheck.preMessage) await this.ui.showMessage(moveCheck.preMessage, 1200);
         if (moveCheck.message) await this.ui.showMessage(moveCheck.message, 1500);
+        if (moveCheck.hitSelfDamage) {
+            attacker.currentHp = Math.max(0, attacker.currentHp - moveCheck.hitSelfDamage);
+            this.ui.updateHpBar(atkSide, attacker);
+        }
         if (!moveCheck.canMove) return;
 
         await this.ui.showMessage(`${attacker.name} の ${move.name}！`, 1200);
 
-        // ★追加: 相手が「まもる」状態の場合、攻撃を無効化する
         if (defender.isProtected) {
             await this.ui.showMessage(`${defender.name} は 攻撃から 身を守った！`, 1500);
+            return;
+        }
+
+        if (move.name === 'ちょうはつ') {
+            if (defender.hasSubstitute) {
+                await this.ui.showMessage(`${defender.name} の 身代わりに 防がれた！`, 1500);
+            } else {
+                defender.tauntTurns = 3;
+                await this.ui.showMessage(`${defender.name} は 挑発されて 変化技が 出せなくなった！`, 1500);
+            }
             return;
         }
 
@@ -250,19 +297,56 @@ class GameController {
             return;
         }
 
+        if (move.category === '変化' && defender.hasSubstitute) {
+            await this.ui.showMessage(`${defender.name} の 身代わりに 防がれた！`, 1500);
+            return;
+        }
+
         const result = this.battle.calculateDamage(attacker, defender, move);
-        
         let actualDamage = 0;
+
         if (result.damage > 0) {
-            actualDamage = Math.min(defender.currentHp, result.damage);
-            defender.currentHp = Math.max(0, defender.currentHp - result.damage);
-            this.ui.updateHpBar(defSide, defender);
-            for (let msg of result.messages) await this.ui.showMessage(msg, 1200);
+            if (defender.hasSubstitute) {
+                actualDamage = Math.min(defender.substituteHp, result.damage);
+                defender.substituteHp -= actualDamage;
+                for (let msg of result.messages) await this.ui.showMessage(msg, 1200);
+                
+                if (defender.substituteHp <= 0) {
+                    defender.hasSubstitute = false;
+                    defender.substituteHp = 0;
+                    await this.ui.showMessage(`${defender.name} の 身代わりは 壊れてしまった！`, 1500);
+                } else {
+                    await this.ui.showMessage(`身代わりが ダメージを受けた！`, 1200);
+                }
+            } else {
+                actualDamage = Math.min(defender.currentHp, result.damage);
+                defender.currentHp = Math.max(0, defender.currentHp - result.damage);
+                this.ui.updateHpBar(defSide, defender);
+                for (let msg of result.messages) await this.ui.showMessage(msg, 1200);
+            }
         }
 
         const effects = this.battle.applySecondaryEffects(attacker, defender, move, actualDamage);
         for (let effect of effects) {
-            if (defender.currentHp > 0) {
+            const blockedBySub = (defender.hasSubstitute && effect.target !== 'attacker');
+
+            if (effect.type === 'remove_item' && !blockedBySub) {
+                defender.item = null;
+                await this.ui.showMessage(effect.message, 1500);
+                this.updateFieldUI();
+            }
+
+            if (effect.type === 'recoil' && attacker.currentHp > 0) {
+                attacker.currentHp = Math.max(0, attacker.currentHp - effect.damage);
+                this.ui.updateHpBar(atkSide, attacker);
+                await this.ui.showMessage(effect.message, 1500);
+            }
+
+            if (effect.type === 'switch_out') {
+                this.pendingSwitch = atkSide;
+            }
+
+            if (defender.currentHp > 0 && !blockedBySub) {
                 if (effect.type === 'status') {
                     defender.status = effect.status;
                     const sName = {'burn':'やけど', 'paralyze':'まひ', 'poison':'どく', 'bad_poison':'もうどく', 'sleep':'ねむり', 'freeze':'こおり'}[effect.status];
@@ -270,9 +354,14 @@ class GameController {
                     await this.ui.showMessage(`${defender.name} は ${sName} 状態に なった！`, 1500);
                 }
                 if (effect.type === 'flinch') defender.isFlinching = true;
+                if (effect.type === 'confusion') {
+                    defender.volatiles = defender.volatiles || {};
+                    defender.volatiles.confusionTurns = Math.floor(Math.random() * 4) + 2;
+                    await this.ui.showMessage(`${defender.name} は こんらんした！`, 1500);
+                }
             }
             
-            if (effect.type === 'rank') {
+            if (effect.type === 'rank' && (!blockedBySub || effect.target === 'attacker')) {
                 const targetPoke = effect.target === 'attacker' ? attacker : defender;
                 if (targetPoke.currentHp > 0) {
                     const statName = {'attack':'こうげき', 'defense':'ぼうぎょ', 'sp_attack':'とくこう', 'sp_defense':'とくぼう', 'speed':'すばやさ', 'accuracy':'めいちゅう', 'evasion':'かいひ'}[effect.stat];
@@ -306,14 +395,29 @@ class GameController {
         if (p1Effect) {
             p1.currentHp = Math.max(0, p1.currentHp - p1Effect.damage);
             this.ui.updateHpBar('player', p1);
-            await this.ui.showMessage(p1Effect.message, 1500);
+            for (let msg of p1Effect.messages) await this.ui.showMessage(msg, 1500);
+            
+            // やどりぎの回復処理など
+            if (p1.lastLeechSeedDamage && p2.currentHp > 0) {
+                p2.currentHp = Math.min(p2.maxHp, p2.currentHp + p1.lastLeechSeedDamage);
+                this.ui.updateHpBar('enemy', p2);
+                await this.ui.showMessage(`${p2.name} の 体力が 回復した！`, 1200);
+                p1.lastLeechSeedDamage = 0;
+            }
         }
 
         const p2Effect = this.battle.applyEndOfTurnEffects(p2);
         if (p2Effect) {
             p2.currentHp = Math.max(0, p2.currentHp - p2Effect.damage);
             this.ui.updateHpBar('enemy', p2);
-            await this.ui.showMessage(p2Effect.message, 1500);
+            for (let msg of p2Effect.messages) await this.ui.showMessage(msg, 1500);
+
+            if (p2.lastLeechSeedDamage && p1.currentHp > 0) {
+                p1.currentHp = Math.min(p1.maxHp, p1.currentHp + p2.lastLeechSeedDamage);
+                this.ui.updateHpBar('player', p1);
+                await this.ui.showMessage(`${p1.name} の 体力が 回復した！`, 1200);
+                p2.lastLeechSeedDamage = 0;
+            }
         }
     }
 
@@ -334,8 +438,7 @@ class GameController {
             if (hasAlive) {
                 const aliveIdxs = this.enemyParty.map((p, i) => p.currentHp > 0 ? i : -1).filter(i => i !== -1);
                 this.activeEnemyIdx = aliveIdxs[Math.floor(Math.random() * aliveIdxs.length)];
-                this.getActiveEnemy().statRanks = { attack: 0, defense: 0, sp_attack: 0, sp_defense: 0, speed: 0, accuracy: 0, evasion: 0 };
-                this.getActiveEnemy().isProtected = false;
+                this.getActiveEnemy().resetBattleState();
                 this.updateFieldUI();
                 await this.ui.showMessage(`あいては ${this.getActiveEnemy().name} を くりだした！`, 1500);
                 this.promptCommand();
@@ -360,7 +463,6 @@ class GameController {
         this.ui.buildTradeScreen(this.playerParty, this.enemyParty, (tradeType, playerIdx, enemyIdx) => {
             
             if (tradeType === 'pokemon') {
-                // ポケモンごとの交換
                 const temp = this.playerParty[playerIdx];
                 this.playerParty[playerIdx] = this.enemyParty[enemyIdx];
                 this.enemyParty[enemyIdx] = temp;
@@ -369,12 +471,10 @@ class GameController {
                 });
                 
             } else if (tradeType === 'item') {
-                // もちものだけ交換
                 const tempItem = this.playerParty[playerIdx].item;
                 this.playerParty[playerIdx].item = this.enemyParty[enemyIdx].item;
                 this.enemyParty[enemyIdx].item = tempItem;
                 
-                // セーブデータ用のもちもの情報も更新する
                 const tempOrigItem = this.playerParty[playerIdx]._originalSetInfo.item;
                 this.playerParty[playerIdx]._originalSetInfo.item = this.enemyParty[enemyIdx]._originalSetInfo.item;
                 this.enemyParty[enemyIdx]._originalSetInfo.item = tempOrigItem;
@@ -384,12 +484,10 @@ class GameController {
                 });
                 
             } else {
-                // こうかんしない（スキップ）
                 this.prepareNextBattle();
             }
         });
     }
-
 
     prepareNextBattle() {
         const enemyPool = this.getRandomSets(3);
