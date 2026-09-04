@@ -1,218 +1,259 @@
+// js/battle.js
+
 class BattleSystem {
     constructor(typeChart, movesData) {
         this.typeChart = typeChart;
         this.movesData = movesData;
     }
 
-    // ランク補正込みのステータス実数値を計算
-    getStatWithRank(baseStat, rank) {
-        if (!rank) return baseStat;
-        if (rank > 0) {
-            return Math.floor(baseStat * ((2 + rank) / 2));
-        } else if (rank < 0) {
-            return Math.floor(baseStat * (2 / (2 - rank)));
-        }
-        return baseStat;
+    // すばやさ比較（同速の場合はランダム）
+    compareSpeed(p1, p2) {
+        const speed1 = this.calculateActualStat(p1, 'speed') * (p1.status === 'paralyze' ? 0.5 : 1);
+        const speed2 = this.calculateActualStat(p2, 'speed') * (p2.status === 'paralyze' ? 0.5 : 1);
+        if (speed1 === speed2) return Math.random() < 0.5 ? 1 : -1;
+        return speed1 - speed2;
     }
 
-    // ランク補正込みの命中率を計算
-    getAccuracyWithRank(baseAccuracy, accRank, evaRank) {
-        if (baseAccuracy === null) return 100; // 必中技
-        let rank = (accRank || 0) - (evaRank || 0);
-        if (rank > 6) rank = 6;
-        if (rank < -6) rank = -6;
-        
-        let multiplier = 1.0;
-        if (rank >= 0) {
-            multiplier = (3 + rank) / 3;
-        } else {
-            multiplier = 3 / (3 - rank);
-        }
-        return Math.floor(baseAccuracy * multiplier);
+    // ランク補正込みの実数値を計算
+    calculateActualStat(pokemon, statName) {
+        const base = pokemon.stats[statName];
+        const rank = pokemon.statRanks[statName] || 0;
+        const multiplier = rank >= 0 ? (2 + rank) / 2 : 2 / (2 - rank);
+        return Math.floor(base * multiplier);
     }
 
-    // すばやさの比較（まひ、スカーフ、ランク補正を考慮）
-    compareSpeed(poke1, poke2) {
-        let spd1 = this.getStatWithRank(poke1.stats.speed, poke1.statRanks.speed);
-        let spd2 = this.getStatWithRank(poke2.stats.speed, poke2.statRanks.speed);
-        
-        if (poke1.status === 'paralyze') spd1 = Math.floor(spd1 / 2);
-        if (poke2.status === 'paralyze') spd2 = Math.floor(spd2 / 2);
-
-        if (poke1.item === 'こだわりスカーフ') spd1 = Math.floor(spd1 * 1.5);
-        if (poke2.item === 'こだわりスカーフ') spd2 = Math.floor(spd2 * 1.5);
-
-        if (spd1 > spd2) return 1;
-        if (spd1 < spd2) return -1;
-        return Math.random() >= 0.5 ? 1 : -1; // 同速は50%の乱数
-    }
-
-    // タイプ相性の倍率を取得
-    getTypeMultiplier(moveType, targetTypes) {
-        let multiplier = 1.0;
-        for (let t of targetTypes) {
-            if (this.typeChart[moveType] && this.typeChart[moveType][t] !== undefined) {
-                multiplier *= this.typeChart[moveType][t];
+    // タイプ相性の計算
+    getTypeEffectiveness(moveType, targetTypes) {
+        if (!this.typeChart[moveType]) return 1;
+        let effectiveness = 1;
+        for (let type of targetTypes) {
+            if (this.typeChart[moveType][type] !== undefined) {
+                effectiveness *= this.typeChart[moveType][type];
             }
         }
-        return multiplier;
+        return effectiveness;
     }
 
-    // 命中判定
-    checkHit(attacker, defender, move) {
-        if (move.accuracy === null) return true;
-        const accuracy = this.getAccuracyWithRank(move.accuracy, attacker.statRanks.accuracy, defender.statRanks.evasion);
-        return (Math.random() * 100) < accuracy;
-    }
-
-    // 行動可能かどうかの判定（状態異常・ひるみ）
-    checkCanMove(pokemon) {
+    // 行動可能判定（状態異常、ひるみ、ちょうはつ、こんらん等）
+    checkCanMove(pokemon, move) {
         if (pokemon.currentHp <= 0) return { canMove: false };
 
+        // ねこだまし・であいがしら 等の初手限定技の判定
+        if (move && ['ねこだまし', 'であいがしら'].includes(move.name) && !pokemon.isFirstTurn) {
+            return { canMove: false, message: `しかし うまくきまらなかった！` };
+        }
+
+        // ちょうはつ
+        if (pokemon.tauntTurns > 0 && move && move.category === '変化') {
+            return { canMove: false, message: `${pokemon.name} は 挑発されていて 技が出せない！` };
+        }
+
+        // こおり
+        if (pokemon.status === 'freeze') {
+            if (Math.random() < 0.2 || (move && ['かえんぐるま', 'フレアドライブ', 'ねっとう'].includes(move.name))) {
+                pokemon.status = 'none';
+                return { canMove: true, preMessage: `${pokemon.name} の こおりが とけた！` };
+            }
+            return { canMove: false, message: `${pokemon.name} は こおってしまって 動けない！` };
+        }
+
+        // ねむり
+        if (pokemon.status === 'sleep') {
+            if (Math.random() < 0.33) { // 簡易的な起床判定（約33%）
+                pokemon.status = 'none';
+                return { canMove: true, preMessage: `${pokemon.name} は 目を覚ました！` };
+            }
+            return { canMove: false, message: `${pokemon.name} は ぐうぐう 眠っている` };
+        }
+
+        // まひ
+        if (pokemon.status === 'paralyze' && Math.random() < 0.25) {
+            return { canMove: false, message: `${pokemon.name} は 体がしびれて 動けない！` };
+        }
+
+        // ひるみ
         if (pokemon.isFlinching) {
             pokemon.isFlinching = false;
             return { canMove: false, message: `${pokemon.name} は ひるんで 動けない！` };
         }
 
-        switch (pokemon.status) {
-            case 'sleep':
+        // こんらん
+        if (pokemon.volatiles && pokemon.volatiles.confusionTurns > 0) {
+            pokemon.volatiles.confusionTurns--;
+            if (pokemon.volatiles.confusionTurns === 0) {
+                return { canMove: true, preMessage: `${pokemon.name} の こんらんが とけた！` };
+            } else {
                 if (Math.random() < 0.33) {
-                    pokemon.status = 'none';
-                    return { canMove: true, message: `${pokemon.name} は 目を覚ました！` };
+                    // 自傷ダメージ計算 (威力40の物理技として計算)
+                    const level = 50;
+                    const atk = this.calculateActualStat(pokemon, 'attack');
+                    const def = this.calculateActualStat(pokemon, 'defense');
+                    let dmg = Math.floor((Math.floor((level * 2 / 5) + 2) * 40 * atk / def) / 50) + 2;
+                    dmg = Math.floor(dmg * (0.85 + Math.random() * 0.15));
+                    return { canMove: false, hitSelfDamage: dmg, message: `${pokemon.name} は わけもわからず 自分を攻撃した！` };
+                } else {
+                    return { canMove: true, preMessage: `${pokemon.name} は こんらんしている！` };
                 }
-                return { canMove: false, message: `${pokemon.name} は ぐうぐう 眠っている` };
-            case 'freeze':
-                if (Math.random() < 0.2) {
-                    pokemon.status = 'none';
-                    return { canMove: true, message: `${pokemon.name} は こおりが とけた！` };
-                }
-                return { canMove: false, message: `${pokemon.name} は こおってしまって 動けない！` };
-            case 'paralyze':
-                if (Math.random() < 0.25) {
-                    return { canMove: false, message: `${pokemon.name} は からだが しびれて 動けない！` };
-                }
-                break;
+            }
         }
+
         return { canMove: true };
     }
 
-    // ダメージ計算（ランク、タイプ相性、持ち物、乱数を考慮）
+    // 命中判定
+    checkHit(attacker, defender, move) {
+        if (!move.accuracy || move.accuracy === '-') return true; // 必中技
+        
+        let accRank = (attacker.statRanks.accuracy || 0) - (defender.statRanks.evasion || 0);
+        accRank = Math.max(-6, Math.min(6, accRank));
+        const multiplier = accRank >= 0 ? (3 + accRank) / 3 : 3 / (3 - accRank);
+        
+        let actualAccuracy = move.accuracy * multiplier;
+        return (Math.random() * 100) <= actualAccuracy;
+    }
+
+    // ダメージ計算
     calculateDamage(attacker, defender, move) {
-        if (move.category === '変化') return { damage: 0, messages: [] };
+        if (move.category === '変化' || move.power === 0) return { damage: 0, messages: [] };
 
-        let atkStat = move.category === '物理' 
-            ? this.getStatWithRank(attacker.stats.attack, attacker.statRanks.attack) 
-            : this.getStatWithRank(attacker.stats.sp_attack, attacker.statRanks.sp_attack);
-            
-        let defStat = move.category === '物理' 
-            ? this.getStatWithRank(defender.stats.defense, defender.statRanks.defense) 
-            : this.getStatWithRank(defender.stats.sp_defense, defender.statRanks.sp_defense);
+        const messages = [];
+        const level = 50;
+        let power = move.power;
 
-        if (move.category === '物理' && attacker.status === 'burn') {
+        // はたきおとすの威力上昇（相手が持ち物を持っている場合）
+        if (move.name === 'はたきおとす' && defender.item) {
+            power = Math.floor(power * 1.5);
+        }
+
+        const isPhysical = move.category === '物理';
+        let atkStat = this.calculateActualStat(attacker, isPhysical ? 'attack' : 'sp_attack');
+        let defStat = this.calculateActualStat(defender, isPhysical ? 'defense' : 'sp_defense');
+
+        // やけどによる物理攻撃半減
+        if (isPhysical && attacker.status === 'burn' && move.name !== 'からげんき') {
             atkStat = Math.floor(atkStat / 2);
         }
 
-        // 持ち物補正
-        if (attacker.item === 'こだわりハチマキ' && move.category === '物理') atkStat = Math.floor(atkStat * 1.5);
-        if (attacker.item === 'こだわりメガネ' && move.category === '特殊') atkStat = Math.floor(atkStat * 1.5);
-        if (attacker.item === 'いのちのたま') atkStat = Math.floor(atkStat * 1.3);
-        
-        if (defender.item === 'しんかのきせき') {
-            defStat = Math.floor(defStat * 1.5);
-        }
-        if (defender.item === 'とつげきチョッキ' && move.category === '特殊') {
-            defStat = Math.floor(defStat * 1.5);
+        // ベースダメージ計算
+        let damage = Math.floor((Math.floor((level * 2 / 5) + 2) * power * atkStat / defStat) / 50) + 2;
+
+        // 急所判定 (1/24 = 約4.17%)
+        let isCrit = Math.random() < (1 / 24);
+        if (isCrit) {
+            damage = Math.floor(damage * 1.5);
+            messages.push('急所に 当たった！');
         }
 
-        const level = 50;
-        let baseDamage = Math.floor(Math.floor(Math.floor(2 * level / 5 + 2) * move.power * atkStat / defStat) / 50) + 2;
+        // 乱数 (0.85 〜 1.0)
+        damage = Math.floor(damage * (0.85 + Math.random() * 0.15));
 
-        // 乱数補正 (0.85 ~ 1.0)
-        baseDamage = Math.floor(baseDamage * (85 + Math.floor(Math.random() * 16)) / 100);
-
-        // タイプ一致補正
+        // タイプ一致補正 (STAB)
         if (attacker.types.includes(move.type)) {
-            baseDamage = Math.floor(baseDamage * 1.5);
+            damage = Math.floor(damage * 1.5);
         }
 
-        const messages = [];
-        
-        // タイプ相性補正
-        const typeMod = this.getTypeMultiplier(move.type, defender.types);
-        if (typeMod === 0) {
-            return { damage: 0, messages: [`${defender.name} には 効果がないようだ...`] };
+        // タイプ相性
+        const effectiveness = this.getTypeEffectiveness(move.type, defender.types);
+        if (effectiveness > 1) {
+            damage = Math.floor(damage * effectiveness);
+            messages.push('効果は ばつぐんだ！');
+        } else if (effectiveness < 1 && effectiveness > 0) {
+            damage = Math.floor(damage * effectiveness);
+            messages.push('効果は いまひとつのようだ');
+        } else if (effectiveness === 0) {
+            return { damage: 0, messages: ['相手には 効果がないようだ…'] };
         }
-        if (typeMod > 1) messages.push('効果は ばつぐんだ！');
-        if (typeMod < 1) messages.push('効果は いまひとつのようだ');
-        
-        baseDamage = Math.floor(baseDamage * typeMod);
 
-        return { damage: baseDamage, messages };
+        // 持ち物による火力補正（いのちのたま、こだわり系など）
+        if (attacker.item === 'いのちのたま') damage = Math.floor(damage * 1.3);
+        if (attacker.item === 'こだわりハチマキ' && isPhysical) damage = Math.floor(damage * 1.5);
+        if (attacker.item === 'こだわりメガネ' && !isPhysical) damage = Math.floor(damage * 1.5);
+
+        return { damage: Math.max(1, damage), messages };
     }
 
-    // 技の追加効果処理（回復、状態異常、ひるみ、ランク変化）
-    applySecondaryEffects(attacker, defender, move, damage) {
+    // 追加効果・反動・交代技・持ち物無効化の適用
+    applySecondaryEffects(attacker, defender, move, actualDamage) {
         const effects = [];
 
-        if (move.recoil) {
-            const recoilDamage = Math.max(1, Math.floor(damage * move.recoil));
-            effects.push({ type: 'heal', amount: -recoilDamage, target: 'attacker', message: `${attacker.name} は 反動の ダメージを受けた！` });
-        }
-        
-        if (move.drain) {
-            const healAmount = Math.max(1, Math.floor(damage * move.drain));
-            effects.push({ type: 'heal', amount: healAmount, target: 'attacker', message: `${attacker.name} の 体力が 回復した！` });
+        // いのちのたま反動
+        if (attacker.item === 'いのちのたま' && actualDamage > 0) {
+            effects.push({ type: 'recoil', target: 'attacker', damage: Math.floor(attacker.maxHp / 10), message: `${attacker.name} は 命を削って 攻撃した！` });
         }
 
-        if (move.effect && move.effectChance && defender.status === 'none') {
-            if (Math.random() * 100 < move.effectChance) {
-                if (['burn', 'paralyze', 'poison', 'bad_poison', 'sleep', 'freeze'].includes(move.effect)) {
-                    effects.push({ type: 'status', status: move.effect });
+        // 通常の反動技 (フレアドライブなど)
+        if (move.recoil && actualDamage > 0) {
+            const recoilDmg = Math.floor(actualDamage * move.recoil);
+            effects.push({ type: 'recoil', target: 'attacker', damage: recoilDmg, message: `${attacker.name} は 反動の ダメージを受けた！` });
+        }
+
+        // はたきおとす
+        if (move.name === 'はたきおとす' && defender.item && defender.currentHp > 0 && actualDamage > 0) {
+            effects.push({ type: 'remove_item', target: 'defender', message: `${defender.name} は ${defender.item} を はたき落とされた！` });
+        }
+
+        // 攻撃＋交代技 (とんぼがえり、ボルトチェンジ)
+        if (['とんぼがえり', 'ボルトチェンジ'].includes(move.name) && actualDamage > 0) {
+            effects.push({ type: 'switch_out', target: 'attacker' });
+        }
+
+        // 状態異常などの追加効果 (確率判定)
+        if (move.effect && Math.random() * 100 <= (move.effectChance || 100)) {
+            if (['burn', 'paralyze', 'poison', 'bad_poison', 'sleep', 'freeze'].includes(move.effect.type)) {
+                if (defender.status === 'none') {
+                    effects.push({ type: 'status', status: move.effect.type });
                 }
-            }
-        }
-
-        if (move.effect === 'flinch' && move.effectChance) {
-            if (Math.random() * 100 < move.effectChance) {
+            } else if (move.effect.type === 'flinch') {
                 effects.push({ type: 'flinch' });
+            } else if (move.effect.type === 'confusion') {
+                effects.push({ type: 'confusion' });
             }
-        }
-
-        if (move.effect && (move.effect.includes('_up') || move.effect.includes('_down'))) {
-            const chance = move.effectChance || 100;
-            if (Math.random() * 100 <= chance) {
-                const target = move.target === 'self' ? 'attacker' : 'defender';
-                const parts = move.effect.split('_');
-                const change = parts.includes('up') ? (parseInt(parts[parts.length-1]) || 1) : -(parseInt(parts[parts.length-1]) || 1);
-                const stat = parts[0]; 
-                
-                if (['attack', 'defense', 'sp_attack', 'sp_defense', 'speed', 'accuracy', 'evasion'].includes(stat)) {
-                    effects.push({ type: 'rank', stat, change, target });
-                }
-            }
-        }
-
-        // 専用積み技の例外処理
-        if (move.effect === 'quiver_dance') {
-            effects.push({ type: 'rank', stat: 'sp_attack', change: 1, target: 'attacker' });
-            effects.push({ type: 'rank', stat: 'sp_defense', change: 1, target: 'attacker' });
-            effects.push({ type: 'rank', stat: 'speed', change: 1, target: 'attacker' });
         }
 
         return effects;
     }
 
-    // ターン終了時のダメージ処理（やけど、どくなど）
+    // ターン終了時の定数ダメージ（状態異常、やどりぎ等）
     applyEndOfTurnEffects(pokemon) {
         if (pokemon.currentHp <= 0) return null;
+        
+        let damage = 0;
+        let messages = [];
 
-        if (pokemon.status === 'burn') {
-            return { damage: Math.max(1, Math.floor(pokemon.maxHp / 16)), message: `${pokemon.name} は やけどの ダメージを受けている！` };
-        }
-        if (pokemon.status === 'poison' || pokemon.status === 'bad_poison') {
-            return { damage: Math.max(1, Math.floor(pokemon.maxHp / 8)), message: `${pokemon.name} は どくの ダメージを受けている！` };
+        // もうどく (経過ターンごとに 1/16 ずつ増加)
+        if (pokemon.status === 'bad_poison') {
+            pokemon.badPoisonTurn++;
+            const ratio = Math.min(15, pokemon.badPoisonTurn); // 最大15/16
+            damage += Math.max(1, Math.floor(pokemon.maxHp * ratio / 16));
+            messages.push(`${pokemon.name} は 猛毒の ダメージを受けている！`);
+        } 
+        // 通常のどく・やけど (最大HPの1/8)
+        else if (pokemon.status === 'poison' || pokemon.status === 'burn') {
+            damage += Math.max(1, Math.floor(pokemon.maxHp / 8));
+            const sName = pokemon.status === 'poison' ? 'どく' : 'やけど';
+            messages.push(`${pokemon.name} は ${sName}の ダメージを受けている！`);
         }
 
+        // やどりぎのタネ
+        if (pokemon.volatiles && pokemon.volatiles.leechSeed) {
+            const seedDmg = Math.max(1, Math.floor(pokemon.maxHp / 8));
+            damage += seedDmg;
+            messages.push(`${pokemon.name} は 体力を 奪われた！`);
+            // ※吸い取った回復処理は main.js 側でハンドリングするためのフラグ
+            pokemon.lastLeechSeedDamage = seedDmg; 
+        }
+
+        // 挑発ターンの消費
+        if (pokemon.tauntTurns > 0) {
+            pokemon.tauntTurns--;
+            if (pokemon.tauntTurns === 0) {
+                messages.push(`${pokemon.name} の 挑発が 解けた！`);
+            }
+        }
+
+        if (damage > 0 || messages.length > 0) {
+            return { damage, messages };
+        }
         return null;
     }
 }
